@@ -88,7 +88,12 @@ class JsonMessage
         err = nil
         if dec_json.has_key?(name.to_s)
           begin
-            field.validate(dec_json[name.to_s])
+            if is_nested_field?(field)
+              nested = field.schema.klass.from_decoded_json(dec_json[name.to_s])
+              dec_json[name.to_s] = nested
+            else
+              field.validate(dec_json[name.to_s])
+            end
           rescue ValidationError => e
             err = e.errors[name]
           end
@@ -110,6 +115,21 @@ class JsonMessage
 
     def optional(name, schema = nil, default = nil, &blk)
       define_field(name, :schema => schema, :default => default, &blk)
+    end
+
+    # implement membrane 'interface' of schema
+    def validate(object)
+      raise Membrane::SchemaValidationError.new("Invalid type") unless object.is_a? Hash
+
+      begin
+        from_decoded_json(object)
+      rescue ValidationError => e
+        raise Membrane::SchemaValidationError.new(e.to_s)
+      end
+    end
+
+    def is_nested_field?(field)
+      field.schema.is_a?(Membrane::Schemas::Class) && field.schema.klass < JsonMessage
     end
 
     protected
@@ -141,19 +161,31 @@ class JsonMessage
 
     missing_fields = {}
 
+    tmp_msg = @msg.dup
+
     self.class.fields.each do |name, field|
       if field.required && !@msg.has_key?(name)
         missing_fields[name] = "Missing field #{name}"
+      end
+      if self.class.is_nested_field?(field)
+        tmp_msg[name] = tmp_msg[name].extract
       end
     end
 
     raise ValidationError.new(missing_fields) unless missing_fields.empty?
 
-    Yajl::Encoder.encode(@msg)
+    Yajl::Encoder.encode(tmp_msg)
   end
 
   def extract(opts = {})
     hash = @msg.dup
+
+    hash.each do |k,v|
+      if v.class < JsonMessage
+        hash[k] = v.extract(opts)
+      end
+    end
+
     if opts[:stringify_keys]
       hash = hash.inject({}) { |memo,(k,v)| memo[k.to_s] = v; memo }.freeze
     end

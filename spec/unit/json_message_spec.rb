@@ -270,4 +270,87 @@ describe JsonMessage do
       extracted.should == {"required" => "required", "optional" => "default"}
     end
   end
+
+  describe "nested field" do
+    before :each do
+      @inner = Class.new(JsonMessage)
+      @inner.required :value, String
+
+      @outer = Class.new(JsonMessage)
+      @outer.required :nested, @inner
+    end
+
+    it 'should support nested in nested schema' do
+      @outer_lvl2 = Class.new(JsonMessage)
+      @outer_lvl2.required :nested, @outer
+
+      value = 'test'
+      encoded = Yajl::Encoder.encode({
+        :nested => {
+          :nested => {
+            :value => value
+          }
+        }
+      })
+
+      @outer_lvl2.decode(encoded).nested.nested.value.should == value
+    end
+
+    it 'should support decode nested message' do
+      malformed = Yajl::Encoder.encode({
+        :nested => {
+          :value => 1
+        }
+      })
+
+      expect {
+        @klass.decode(malformed)
+      }.to raise_error do |error|
+        error.should be_an_instance_of(JsonMessage::ValidationError)
+        error.message.size.should > 0
+      end
+
+      value = 'test'
+      encoded = Yajl::Encoder.encode({
+        :nested => {
+          :value => value
+        }
+      })
+
+      expect {
+        decoded = @outer.decode(encoded)
+        decoded.nested.class.should == @inner
+        decoded.nested.value.should == value
+      }.to_not raise_error
+    end
+
+    it 'should support encode' do
+      value = 'test'
+      inner = @inner.new
+      inner.value = value
+
+      outer = @outer.new
+      outer.nested = inner
+
+      encoded = outer.encode
+      encoded.should_not be_nil
+
+      parsed = Yajl::Parser.parse(encoded)
+      parsed['nested']['value'].should == value
+    end
+
+    it 'should support extract' do
+      value = 'test'
+      encoded = Yajl::Encoder.encode({
+        :nested => {
+          :value => value
+        }
+      })
+
+      outer = @outer.decode(encoded)
+      extracted = outer.extract
+      extracted.should_not be_nil
+      extracted[:nested][:value].should == value
+    end
+  end
 end
