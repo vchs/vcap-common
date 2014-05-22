@@ -236,6 +236,19 @@ describe JsonMessage do
       }
     end
 
+    it 'should raise validation errors when required fields are missing' do
+      @klass.required :required_one, String
+      @klass.required :required_two, String
+
+      expect {
+        @klass.decode(Yajl::Encoder.encode({required_one: 1}))
+      }.to raise_error { |error|
+        error.should be_a(JsonMessage::ValidationError)
+        error.message.size.should > 0
+        error.errors.keys.include?(:required_one).should be_true
+      }
+    end
+
     it 'should decode json' do
       @klass.required :required, String
       @klass.optional :with_default, String, "default"
@@ -278,11 +291,12 @@ describe JsonMessage do
 
       @outer = Class.new(JsonMessage)
       @outer.required :nested, @inner
+
+      @outer_lvl2 = Class.new(JsonMessage)
+      @outer_lvl2.required :nested, @outer
     end
 
     it 'should support nested in nested schema' do
-      @outer_lvl2 = Class.new(JsonMessage)
-      @outer_lvl2.required :nested, @outer
 
       value = 'test'
       encoded = Yajl::Encoder.encode({
@@ -299,16 +313,17 @@ describe JsonMessage do
     it 'should support decode nested message' do
       malformed = Yajl::Encoder.encode({
         :nested => {
-          :value => 1
+          :nested => {
+            :value => 1
+          }
         }
       })
 
-      expect {
-        @klass.decode(malformed)
-      }.to raise_error do |error|
+      expect { @outer_lvl2.decode(malformed) }.to raise_error { |error|
         error.should be_an_instance_of(JsonMessage::ValidationError)
-        error.message.size.should > 0
-      end
+        contains_error_field = error.errors.keys.include?(:"nested.nested.value")
+        contains_error_field.should be_true
+      }
 
       value = 'test'
       encoded = Yajl::Encoder.encode({

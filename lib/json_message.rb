@@ -87,21 +87,24 @@ class JsonMessage
       fields.each do |name, field|
         err = nil
         if dec_json.has_key?(name.to_s)
+          nested = is_nested_field?(field)
           begin
-            if is_nested_field?(field)
+            if nested
               nested = field.schema.klass.from_decoded_json(dec_json[name.to_s])
               dec_json[name.to_s] = nested
             else
               field.validate(dec_json[name.to_s])
             end
           rescue ValidationError => e
-            err = e.errors[name]
+            if nested
+              e.errors.each { |k, v| errs["#{name.to_s}.#{k.to_s}".to_sym] = v }
+            else
+              errs[name] = e.errors[name]
+            end
           end
         elsif field.required
-          err = "Missing field #{name}"
+          errs[name] = "Missing field #{name}"
         end
-
-        errs[name] = err if err
       end
 
       raise ValidationError.new(errs) unless errs.empty?
